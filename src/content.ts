@@ -57,9 +57,10 @@ function storeBothValues() {
             const abbreviatedNumber = innerSpan.textContent?.trim() ?? '' // 例: "1.3"
             const unit = text.slice(abbreviatedNumber.length) // 例: "K"
 
-            innerSpan.setAttribute('data-abbreviated', abbreviatedNumber)
-            innerSpan.setAttribute('data-exact', exactNumber) // 例: "1,262"
-            innerSpan.setAttribute('data-unit', unit) // 例: "K"
+            // outerSpanに属性を保存（構造が変わっても見つけられるように）
+            outerSpan.setAttribute('data-abbreviated', abbreviatedNumber)
+            outerSpan.setAttribute('data-exact', exactNumber) // 例: "1,262"
+            outerSpan.setAttribute('data-unit', unit) // 例: "K"
 
             // 親要素に処理済みマークを付ける
             el.setAttribute(PROCESSED_ATTR, 'true')
@@ -75,19 +76,15 @@ function updateDisplayedCounts(showExact: boolean) {
   const processedLinks = document.querySelectorAll(`[${PROCESSED_ATTR}]`)
 
   processedLinks.forEach((el) => {
-    // 内側のspanを探す（data属性がついている要素）
-    const innerSpans = el.querySelectorAll('span[data-abbreviated][data-exact]')
+    // outerSpanを探す（data属性がついている要素）
+    const outerSpans = el.querySelectorAll('span[data-abbreviated][data-exact]')
 
-    innerSpans.forEach((innerSpan) => {
-      const abbreviated = innerSpan.getAttribute('data-abbreviated')
-      const exact = innerSpan.getAttribute('data-exact')
-      const unit = innerSpan.getAttribute('data-unit')
+    outerSpans.forEach((outerSpan) => {
+      const abbreviated = outerSpan.getAttribute('data-abbreviated')
+      const exact = outerSpan.getAttribute('data-exact')
+      const unit = outerSpan.getAttribute('data-unit')
 
       if (!abbreviated || !exact) return
-
-      // 現在の表示内容と変更後が同じ場合はスキップ
-      const outerSpan = innerSpan.parentElement
-      if (!outerSpan) return
 
       const currentText = outerSpan.textContent?.trim()
       const targetText = showExact ? exact : `${abbreviated}${unit ?? ''}`
@@ -98,7 +95,7 @@ function updateDisplayedCounts(showExact: boolean) {
 
       if (showExact) {
         // 正確な値を表示する場合
-        // 親span全体のテキストを正確な値に置き換え
+        // span全体のテキストを正確な値に置き換え
         outerSpan.textContent = exact
       } else {
         // 省略形に戻す場合
