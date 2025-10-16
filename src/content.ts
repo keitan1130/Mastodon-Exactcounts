@@ -67,6 +67,14 @@ function updateDisplayedCounts(showExact: boolean) {
       const abbreviated = strongEl.getAttribute('data-abbreviated')
       const exact = strongEl.getAttribute('data-exact')
 
+      // 現在の表示内容と変更後が同じ場合はスキップ
+      const currentText = strongEl.textContent?.trim()
+      const targetText = showExact ? exact : abbreviated
+
+      if (currentText === targetText) {
+        return // 変更不要
+      }
+
       if (showExact && exact) {
         strongEl.innerHTML = exact
       } else if (!showExact && abbreviated) {
@@ -91,8 +99,13 @@ async function init() {
   // 現在の設定に応じて表示を更新
   updateDisplayedCounts(enabled)
 
+  let observerPaused = false
+
   // MutationObserver で動的に追加される要素も監視
   const observer = new MutationObserver((mutations) => {
+    // 自分の変更による呼び出しを無視
+    if (observerPaused) return
+
     // パフォーマンスのため、実際にノードが追加された場合のみ処理
     const hasAddedNodes = mutations.some(
       (mutation) => mutation.addedNodes.length > 0
@@ -102,7 +115,13 @@ async function init() {
       storeBothValues()
       // 現在の設定に応じて表示を更新
       isEnabled().then((enabled) => {
+        // Observer を一時停止
+        observerPaused = true
         updateDisplayedCounts(enabled)
+        // 次のイベントループで再開
+        setTimeout(() => {
+          observerPaused = false
+        }, 0)
       })
     }
   })
@@ -116,8 +135,14 @@ async function init() {
   // init内に移動してMastodonページでのみ登録
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'sync' && changes[ENABLE_KEY]) {
+      // Observer を一時停止
+      observerPaused = true
       // リロードせずに表示を切り替え
       updateDisplayedCounts(changes[ENABLE_KEY].newValue)
+      // 次のイベントループで再開
+      setTimeout(() => {
+        observerPaused = false
+      }, 0)
     }
   })
 }
