@@ -1,5 +1,11 @@
 /* Popup.css */
 
+/* ブラウザのデフォルトmarginをリセット */
+body {
+  margin: 0;
+  padding: 0;
+}
+
 .popup-container {
   padding: 20px;
   width: 250px;
