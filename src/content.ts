@@ -11,39 +11,37 @@ async function isEnabled(): Promise<boolean> {
 }
 
 function replaceCountsFromAttributes() {
-  // title属性やaria-label属性に完全な数値が含まれている要素を探す
-  // Mastodonでは省略表記の要素に、マウスオーバー時のポップアップ用に正確な数値が格納されている
-  const elements = document.querySelectorAll(`[title]:not([${PROCESSED_ATTR}]), [aria-label]:not([${PROCESSED_ATTR}])`)
+  // プロフィールの投稿数・フォロー数・フォロワー数のみを対象にする
+  // account__header__extra__links クラス内の要素のみを処理
+  const profileLinks = document.querySelectorAll(`.account__header__extra__links a[title]:not([${PROCESSED_ATTR}])`)
 
-  elements.forEach((el) => {
+  profileLinks.forEach((el) => {
     const title = el.getAttribute('title')
-    const ariaLabel = el.getAttribute('aria-label')
-
-    // title や aria-label から数値を抽出
-    // 例: "1,234 replies" → "1,234"
-    // 例: "フォロワー: 5,678" → "5,678"
-    const fullText = title || ariaLabel
-    if (!fullText) return
+    if (!title) return
 
     // 数値部分を抽出（カンマ付き数値に対応）
-    const match = fullText.match(/[\d,]+/)
+    const match = title.match(/[\d,]+/)
     if (!match) return
 
-    const exactNumber = match[0] // "1,234" のような形式
+    const exactNumber = match[0] // "1,262" のような形式
 
-    // 表示テキストが省略形（1.2k, 1.2K, 1.2m, 1.2M等）なら置き換え
-    const displayText = el.textContent?.trim() ?? ''
-    if (/^\d+(?:\.\d+)?[kKmM]$/.test(displayText)) {
-      // テキストノードを探して置き換え
-      const textNode = Array.from(el.childNodes).find(
-        (n) => n.nodeType === Node.TEXT_NODE && /^\d+(?:\.\d+)?[kKmM]$/.test(n.textContent?.trim() ?? '')
-      )
-      if (textNode) {
-        textNode.textContent = exactNumber
-        // 処理済みマークを付ける
+    // この要素内の直接の子孫にある strong 要素を探す
+    // 例: <a title="1,262"><span><strong><span><span>1.3</span>K</span></strong> 投稿</span></a>
+    const strongElements = el.querySelectorAll('strong')
+
+    strongElements.forEach((strongEl) => {
+      const text = strongEl.textContent?.trim() ?? ''
+
+      // 省略形のパターンをチェック（1.3K、1.3k、1.3M等）
+      // 完全一致する場合のみ置き換える
+      if (/^\d+(?:\.\d+)?[kKmM]$/.test(text)) {
+        // strongの中身を完全に置き換える
+        strongEl.innerHTML = exactNumber
+
+        // 親要素に処理済みマークを付ける
         el.setAttribute(PROCESSED_ATTR, 'true')
       }
-    }
+    })
   })
 }
 
