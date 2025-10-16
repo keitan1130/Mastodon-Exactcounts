@@ -14,16 +14,27 @@
 
 ---
 
-## 動作の大まかな方針（実装戦略）
+## 動作の大まかな方針(実装戦略)
+
+### HTML属性から取得（シンプル・軽量）
 
 1. **content script** を Mastodon のウェブ UI に注入する。
-2. 各投稿要素から「投稿のパーマリンク（URL）」または投稿 ID を抽出し、そのインスタンス（同一オリジン）の Mastodon API `GET /api/v1/statuses/:id` を呼んで正確なメタデータ（`replies_count`, `reblogs_count`, `favourites_count`）を取得する。
+2. Mastodonの標準UIでは、省略表記（`1.2k`）を表示している要素に、**`title` 属性や `aria-label` 属性などで完全な数値が含まれている**。マウスオーバー時にポップアップで表示される正確な数値がこれらの属性に格納されています。
+3. 該当要素から `title` 属性や `aria-label` 属性を読み取り、その値を表示テキストとして置き換える。
+4. この方法なら **API呼び出し不要** で、ページ読み込み時に即座に変換でき、軽量で高速。
+5. ポップアップで ON/OFF 切り替えを実装し、`chrome.storage.sync` に状態を保存する。
 
-   * ページと同一オリジンに対する fetch であれば CORS の問題は発生しにくい（content script はページと同じオリジンで実行されるため）。
-3. 取得した正確な数値で、画面上の省略表記（`1.2k` 等）を差し替える。
-4. ポップアップで ON/OFF 切り替えを実装し、`chrome.storage`（または `chrome.storage.sync`）に状態を保存する。content script はこの状態を読んで何もしない/行うを決める。
+**対象となる数値：**
+- 投稿数（返信・ブースト・いいね）
+- アカウント情報（フォロワー数・フォロー中の数）
 
-> 注意：Mastodon は分散サービス（インスタンスごとにドメインが異なる）なので、**どのインスタンスで動作させるか（manifest の `matches` / `host_permissions`）は開発時に指定**する必要があります。開発では `*://*/*` や特定のインスタンスを使って試すことができますが、公開する場合はホストを絞るのがベターです。
+**メリット：**
+- ✅ API呼び出し不要で軽量・高速
+- ✅ ネットワークトラフィック削減
+- ✅ マストドンが既に持っている正確なデータを活用
+- ✅ シンプルな実装
+
+> 注意：この拡張は**すべてのマストドンインスタンス**で動作するように設計されています。manifest の `matches` と `host_permissions` は `https://*/*` と `http://*/*` を指定し、任意のインスタンス(mastodon.social、mstdn.jp、その他すべて)で利用可能です。
 
 ---
 
@@ -35,14 +46,14 @@ my-mastodon-counts/               # リポジトリルート
 ├─ vite.config.ts                 # Vite + CRXJS 設定
 ├─ package.json
 ├─ src/
-│  ├─ content.ts                  # content script（DOM 操作・API fetch）
-│  ├─ background.ts               # （必要なら）サービスワーカー / バックグラウンド処理
+│  ├─ content.ts                  # content script（DOM 操作）
+│  ├─ background.ts               # （必要なら）サービスワーカー
 │  ├─ popup/                      # React + TS で作る popup
 │  │  ├─ index.html
 │  │  ├─ main.tsx
 │  │  └─ Popup.tsx
 │  └─ utils/
-│     └─ numbers.ts               # 省略表記の解析や数値フォーマット
+│     └─ numbers.ts               # 数値フォーマット（必要なら）
 ├─ public/                        # static assets（必要なら）
 └─ README.md
 ```
@@ -64,9 +75,9 @@ export default defineConfig({
 })
 ```
 
-### `manifest.json`（例）
+### `manifest.json`(例)
 
-> **要調整**：`matches` は開発環境・対象インスタンスに合わせて変更してください。
+> **全インスタンス対応**：`matches` と `host_permissions` は `https://*/*` と `http://*/*` を指定し、すべてのマストドンインスタンスで動作します。
 
 ```json
 {
@@ -86,9 +97,8 @@ export default defineConfig({
   "content_scripts": [
     {
       "matches": [
-        "https://mastodon.social/*",
-        "https://*.example-instance.tld/*"
-        // 開発時は必要に応じて追加
+        "https://*/*",
+        "http://*/*"
       ],
       "js": ["src/content.ts"],
       "run_at": "document_idle"
@@ -97,8 +107,8 @@ export default defineConfig({
 
   "permissions": ["storage"],
   "host_permissions": [
-    "https://mastodon.social/*",
-    "https://*.example-instance.tld/*"
+    "https://*/*",
+    "http://*/*"
   ]
 }
 ```
@@ -107,18 +117,10 @@ export default defineConfig({
 
 ## content script の実装要点（例：`src/content.ts`）
 
-* ページ内の「投稿 DOM」を監視（`MutationObserver`）して、新しい投稿が出現したら処理する。
-* 各投稿要素から **投稿のパーマリンク（permalink）** を探して投稿 ID を抽出する。
-
-  * 例：`https://instance.tld/@username/123456789012345678` の末尾 `123456789012345678` が status ID
-* 抽出できたら同一オリジンの Mastodon API（`/api/v1/statuses/:id`）を fetch する。
-* API の JSON から `replies_count`, `reblogs_count`, `favourites_count` を取り、投稿 DOM 内の該当数値要素を上書きする。
-* ON/OFF 機能：`chrome.storage` のフラグを読み、OFF の場合は何もしない。
-
-#### 数値反映の実装サンプル（TypeScript — 擬似コード）
+### HTML属性から取得（推奨実装）
 
 ```ts
-// src/content.ts (抜粋・簡略)
+// src/content.ts - HTML属性版（API不要）
 const ENABLE_KEY = 'md_show_exact_counts'
 
 async function isEnabled() {
@@ -126,38 +128,73 @@ async function isEnabled() {
   return s[ENABLE_KEY] ?? true
 }
 
-function extractStatusIdFromAnchor(href: string): string | null {
-  // 最後の / の後が数字のパターンを期待
-  const m = href.match(/\/(\d+)(?:$|[/?#])/)
-  return m ? m[1] : null
-}
+function replaceCountsFromAttributes() {
+  // title属性やaria-label属性に完全な数値が含まれている要素を探す
+  // Mastodonでは省略表記の要素に、マウスオーバー時のポップアップ用に正確な数値が格納されている
+  const elements = document.querySelectorAll('[title], [aria-label]')
 
-async function fetchStatusCounts(origin: string, id: string) {
-  const api = `${origin}/api/v1/statuses/${id}`
-  const res = await fetch(api, { credentials: 'same-origin' })
-  if (!res.ok) throw new Error('fetch failed')
-  return await res.json() // contains replies_count, reblogs_count, favourites_count
-}
+  elements.forEach(el => {
+    const title = el.getAttribute('title')
+    const ariaLabel = el.getAttribute('aria-label')
 
-function replaceCountsInDOM(postEl: Element, counts: { replies: number, reblogs: number, favourites: number }) {
-  // 投稿内の要素探索ロジック。
-  // 実際は Mastodon の DOM 構成に合わせてセレクタを調整してください。
-  const els = Array.from(postEl.querySelectorAll('button, a, span'))
-  els.forEach(el => {
-    const txt = el.textContent?.trim() ?? ''
-    // 省略表記と思われるものを検出して置き換え
-    if (/^\d+(?:\.\d+)?[kM]$/.test(txt)) {
-      // ここは投稿内のどのカウントに相当するか判定して置き換えてください
-      // 例: data-role 属性や aria-label などで判定できる場合が多い
-      el.textContent = String(counts.reblogs) // 例: ブースト数を入れる
+    // title や aria-label から数値を抽出
+    // 例: "1,234 replies" → "1,234"
+    // 例: "フォロワー: 5,678" → "5,678"
+    const fullText = title || ariaLabel
+    if (!fullText) return
+
+    // 数値部分を抽出（カンマ付き数値に対応）
+    const match = fullText.match(/[\d,]+/)
+    if (!match) return
+
+    const exactNumber = match[0] // "1,234" のような形式
+
+    // 表示テキストが省略形（1.2k, 1.2K, 1.2m, 1.2M等）なら置き換え
+    const displayText = el.textContent?.trim() ?? ''
+    if (/^\d+(?:\.\d+)?[kKmM]$/.test(displayText)) {
+      // テキストノードを探して置き換え
+      const textNode = Array.from(el.childNodes).find(n => n.nodeType === Node.TEXT_NODE)
+      if (textNode) {
+        textNode.textContent = exactNumber
+      }
     }
   })
 }
 
-// MutationObserver を使って新しい投稿が来たら上の処理を実行
+// ページ読み込み時とDOM変更時に実行
+async function init() {
+  if (!(await isEnabled())) return
+
+  // 初回実行
+  replaceCountsFromAttributes()
+
+  // MutationObserver で動的に追加される要素も監視
+  const observer = new MutationObserver(() => {
+    replaceCountsFromAttributes()
+  })
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  })
+
+  // storage変更の監視（ポップアップでON/OFFされたとき）
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync' && changes[ENABLE_KEY]) {
+      if (changes[ENABLE_KEY].newValue) {
+        replaceCountsFromAttributes()
+      } else {
+        // OFFにされた場合はページをリロード（元に戻すため）
+        location.reload()
+      }
+    }
+  })
+}
+
+init()
 ```
 
-> **実装ヒント**：Mastodon の DOM はインスタンス・バージョンや UI テーマで変わる可能性があります。最初は開発者ツールで該当する投稿要素の**パーマリンクとなっているアンカー**や**数値が入る要素（aria-label や data 属性）**を探し、セレクタを調整してください。
+> **実装ヒント**：開発者ツールで該当する数値要素（返信・ブースト・いいね・フォロワー・フォロー中）を調べ、`title` 属性や `aria-label` 属性に完全な数値が含まれているか確認してください。マストドンの標準UIでは、マウスオーバー時のポップアップに表示される完全な数値が、これらの属性に格納されています。
 
 ---
 
@@ -254,30 +291,34 @@ npm run build
 
 ## デバッグのコツ
 
-* content script は対象ページのコンテキストで動くので、開発者ツールの「Elements / Console / Network」を使って selector や fetch の URL を追う。
+* content script は対象ページのコンテキストで動くので、開発者ツールの「Elements / Console」を使って selector や属性値を確認する。
+* 開発者ツールで数値要素を選択し、`title` や `aria-label` 属性に正確な数値が含まれているか確認する。
 * `chrome.storage` の変更は `chrome.storage.onChanged.addListener` で content script 側で監視し、即時 ON/OFF を切り替えられるようにする。
-* API fetch が失敗する場合は、fetch の `origin` が正しく取れているか、manifest の `host_permissions` が足りているかを確認。
 
 ---
 
 ## 権限とプライバシー
 
-* host_permissions を広く許すと（例：`<all_urls>`）拡張は多くのドメインで動きますが、公開時の審査やユーザーの信頼に影響します。対象インスタンスを明示的に絞るのが安全です。
-* 取得する数値は公開 API（ステータス情報）から取るため、個人のパスワード等は扱いません。とはいえ利用者に対して拡張が何を取得するかは README 等で明示してください。
+* **host_permissions を広く許可**：この拡張は `https://*/*` と `http://*/*` を許可しており、すべてのウェブサイトにアクセスできます。これにより、mastodon.social、mstdn.jp、その他あらゆるマストドンインスタンスで動作します。
+* **実際の動作範囲**：content script 内でマストドンのページかどうかを判定し、マストドン以外のサイトでは何も実行しないように実装することで、実質的な影響範囲を限定します。
+* **データの取り扱い**：この拡張はページ内のHTML属性（`title`や`aria-label`）から数値を読み取るのみで、外部APIへの通信は行いません。個人のパスワードやプライベートな情報は扱いません。
+* **注意**：広範な権限を要求するため、Chrome Web Store での公開時はレビューが厳しくなる可能性があります。ユーザーには「すべてのウェブサイトのデータの読み取りと変更」という警告が表示されます。
 
 ---
 
 ## 既知の制約 / 注意点
 
-* Mastodon の UI やインスタンス実装によってはセレクタが変わることがあるため、content script のセレクタは定期的にメンテナンスが必要です。
-* 非公開アカウントの投稿や一部の API は認証が必要な場合があります。公開投稿に関しては API で取得できることが多いですが、必ずしもすべての投稿で成功するとは限りません。
+* Mastodon の UI やインスタンス実装によっては、HTML属性の構造が変わることがあるため、content script のセレクタは定期的にメンテナンスが必要になる可能性があります。
+* 一部のカスタムテーマやインスタンス固有のUIでは、`title`属性や`aria-label`属性の形式が異なる場合があります。
+* **広範な権限について**：この拡張はすべてのウェブサイトにアクセスする権限を持ちますが、実際にはマストドンのページでのみ動作するように実装することを強く推奨します。content script 内で `window.location.hostname` や DOM 構造をチェックし、マストドンインスタンスでない場合は早期リターンする処理を入れてください。
 
 ---
 
-## 追加メンテナンス案（任意）
+## 追加メンテナンス案(任意)
 
-* キャッシュ層を入れて API コール数を削減（例：投稿 ID ごとの TTL キャッシュ）
-* インスタンス一覧の UI を作り、ユーザーが対象インスタンスを追加できるようにする（ただし要 permissions の更新）
+* 処理済み要素にマークを付けて、同じ要素を何度も処理しないようにする（パフォーマンス向上）
+* content script 内でマストドンインスタンスを自動検出する仕組み（例：特徴的な DOM 要素の検出）を実装し、マストドン以外のサイトでは何もしないようにする
+* より詳細なセレクタを使って、特定の数値要素のみをターゲットにする（誤検出の防止）
 
 ---
 
@@ -285,7 +326,8 @@ npm run build
 
 * @crxjs/vite-plugin (CRXJS) — npm / GitHub
 * Chrome Extensions Manifest V3 ドキュメント
-* Mastodon API ドキュメント（`GET /api/v1/statuses/:id`）
+* MDN - MutationObserver API
+* MDN - HTML title attribute / aria-label
 
 ---
 
@@ -297,6 +339,13 @@ npm run build
 
 ### 最後に
 
-この README は最小限の機能（投稿数を正確表示、popup の ON/OFF）に特化した開発手順と実装ガイドです。実際の DOM セレクタや対象インスタンスのドメインは環境によって変わるため、まずは**開発者ツールで投稿のパーマリンクと数表示の要素**を確認してから `src/content.ts` のセレクタを合わせる作業を行ってください。
+この README は最小限の機能(投稿数を正確表示、popup の ON/OFF)に特化した開発手順と実装ガイドです。
 
-必要ならば、**実際に使う Mastodon インスタンスの例（例：`https://mastodon.social`、あるいはあなたが使っているインスタンス）を教えて**ください。特定インスタンスを教えていただければ、README 内の manifest/match patterns と content script の具体的なセレクタ候補をさらに書き込んでお渡しします。
+**全インスタンス対応について：**
+この拡張はすべてのマストドンインスタンス(mastodon.social、mstdn.jp、misskey.io、その他あらゆるインスタンス)で動作するように設計されています。実際の DOM セレクタは環境によって変わる可能性があるため、まずは**開発者ツールで投稿のパーマリンクと数表示の要素**を確認してから `src/content.ts` のセレクタを調整してください。
+
+**セキュリティとパフォーマンスのベストプラクティス：**
+- content script の最初で、ページがマストドンインスタンスかどうかを判定する処理を入れることを強く推奨します
+- 例：特定の DOM 要素（`[data-react-class*="Mastodon"]` や `#mastodon` など）の存在確認
+- 処理済み要素にマークを付けて、重複処理を避ける（`data-processed` 属性など）
+- MutationObserver のコールバックは頻繁に呼ばれるため、パフォーマンスに注意
