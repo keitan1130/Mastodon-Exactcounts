@@ -2,7 +2,17 @@
 const ENABLE_KEY = 'md_show_exact_counts'
 const PROCESSED_ATTR = 'data-exact-count-processed'
 
+// chrome.storage が利用可能かチェック
+function isChromeStorageAvailable(): boolean {
+  return typeof chrome !== 'undefined' && !!chrome.storage && !!chrome.storage.sync
+}
+
 async function isEnabled(): Promise<boolean> {
+  if (!isChromeStorageAvailable()) {
+    console.warn('chrome.storage is not available')
+    return true
+  }
+
   return new Promise((resolve) => {
     chrome.storage.sync.get(ENABLE_KEY, (result) => {
       resolve(result[ENABLE_KEY] ?? true)
@@ -68,6 +78,11 @@ function updateDisplayedCounts(showExact: boolean) {
 
 // ページ読み込み時とDOM変更時に実行
 async function init() {
+  if (!isChromeStorageAvailable()) {
+    console.error('chrome.storage is not available, extension cannot function')
+    return
+  }
+
   const enabled = await isEnabled()
 
   // 初回は両方の値を保存
@@ -96,16 +111,16 @@ async function init() {
     childList: true,
     subtree: true,
   })
-}
 
-// storage変更の監視（ポップアップでON/OFFされたとき）
-// 有効/無効に関係なく常にリスナーを登録
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'sync' && changes[ENABLE_KEY]) {
-    // リロードせずに表示を切り替え
-    updateDisplayedCounts(changes[ENABLE_KEY].newValue)
-  }
-})
+  // storage変更の監視（ポップアップでON/OFFされたとき）
+  // init内に移動してMastodonページでのみ登録
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync' && changes[ENABLE_KEY]) {
+      // リロードせずに表示を切り替え
+      updateDisplayedCounts(changes[ENABLE_KEY].newValue)
+    }
+  })
+}
 
 // Mastodonページかどうかを簡易チェック
 function isMastodonPage(): boolean {
