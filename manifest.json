@@ -1,35 +1,38 @@
 {
-"manifest_version": 3,
-"name": "Mastodon Exact Counts",
-"version": "0.1.0",
-"description": "Show Mastodon post counts (replies/reblogs/favourites) in full instead of abbreviated 1.2k",
+    "manifest_version": 3,
+    "name": "Mastodon Exact Counts",
+    "version": "1.0.0",
+    "description": "Mastodonの投稿数、FF数を省略せずに表示します。",
+    "icons": {
+        "128": "icons/icon.png"
+    },
+
+    "action": {
+        "default_popup": "src/popup/index.html",
+        "default_icon": "icons/icon.png"
+    },
 
 
-"action": {
-"default_popup": "src/popup/index.html"
-},
+    "background": {
+        "service_worker": "src/background.ts"
+    },
 
 
-"background": {
-"service_worker": "src/background.ts"
-},
+    "content_scripts": [
+        {
+        "matches": [
+            "https://*/*",
+            "http://*/*"
+        ],
+        "js": ["src/content.ts"],
+        "run_at": "document_idle"
+        }
+    ],
 
 
-"content_scripts": [
-{
-"matches": [
-"https://*/*",
-"http://*/*"
-],
-"js": ["src/content.ts"],
-"run_at": "document_idle"
-}
-],
-
-
-"permissions": ["storage"],
-"host_permissions": [
-"https://*/*",
-"http://*/*"
-]
+    "permissions": ["storage"],
+    "host_permissions": [
+        "https://*/*",
+        "http://*/*"
+    ]
 }
