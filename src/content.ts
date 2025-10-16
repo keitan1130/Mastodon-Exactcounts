@@ -10,7 +10,7 @@ async function isEnabled(): Promise<boolean> {
   })
 }
 
-function replaceCountsFromAttributes() {
+function storeBothValues() {
   // プロフィールの投稿数・フォロー数・フォロワー数のみを対象にする
   // account__header__extra__links クラス内の要素のみを処理
   const profileLinks = document.querySelectorAll(`.account__header__extra__links a[title]:not([${PROCESSED_ATTR}])`)
@@ -33,10 +33,11 @@ function replaceCountsFromAttributes() {
       const text = strongEl.textContent?.trim() ?? ''
 
       // 省略形のパターンをチェック（1.3K、1.3k、1.3M等）
-      // 完全一致する場合のみ置き換える
+      // 完全一致する場合のみ保存する
       if (/^\d+(?:\.\d+)?[kKmM]$/.test(text)) {
-        // strongの中身を完全に置き換える
-        strongEl.innerHTML = exactNumber
+        // 元の省略形と正確な数値の両方を保存
+        strongEl.setAttribute('data-abbreviated', text) // 例: "1.3K"
+        strongEl.setAttribute('data-exact', exactNumber) // 例: "1,262"
 
         // 親要素に処理済みマークを付ける
         el.setAttribute(PROCESSED_ATTR, 'true')
@@ -45,12 +46,35 @@ function replaceCountsFromAttributes() {
   })
 }
 
+function updateDisplayedCounts(showExact: boolean) {
+  // 保存された値を使って表示を切り替える
+  const processedLinks = document.querySelectorAll(`[${PROCESSED_ATTR}]`)
+
+  processedLinks.forEach((el) => {
+    const strongElements = el.querySelectorAll('strong[data-abbreviated][data-exact]')
+
+    strongElements.forEach((strongEl) => {
+      const abbreviated = strongEl.getAttribute('data-abbreviated')
+      const exact = strongEl.getAttribute('data-exact')
+
+      if (showExact && exact) {
+        strongEl.innerHTML = exact
+      } else if (!showExact && abbreviated) {
+        strongEl.innerHTML = abbreviated
+      }
+    })
+  })
+}
+
 // ページ読み込み時とDOM変更時に実行
 async function init() {
-  if (!(await isEnabled())) return
+  const enabled = await isEnabled()
 
-  // 初回実行
-  replaceCountsFromAttributes()
+  // 初回は両方の値を保存
+  storeBothValues()
+
+  // 現在の設定に応じて表示を更新
+  updateDisplayedCounts(enabled)
 
   // MutationObserver で動的に追加される要素も監視
   const observer = new MutationObserver((mutations) => {
@@ -59,7 +83,12 @@ async function init() {
       (mutation) => mutation.addedNodes.length > 0
     )
     if (hasAddedNodes) {
-      replaceCountsFromAttributes()
+      // 新しい要素の値を保存
+      storeBothValues()
+      // 現在の設定に応じて表示を更新
+      isEnabled().then((enabled) => {
+        updateDisplayedCounts(enabled)
+      })
     }
   })
 
@@ -67,23 +96,16 @@ async function init() {
     childList: true,
     subtree: true,
   })
-
-  // storage変更の監視（ポップアップでON/OFFされたとき）
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'sync' && changes[ENABLE_KEY]) {
-      if (changes[ENABLE_KEY].newValue) {
-        // ONにされた場合、処理済みマークをクリアして再実行
-        document.querySelectorAll(`[${PROCESSED_ATTR}]`).forEach((el) => {
-          el.removeAttribute(PROCESSED_ATTR)
-        })
-        replaceCountsFromAttributes()
-      } else {
-        // OFFにされた場合はページをリロード（元に戻すため）
-        location.reload()
-      }
-    }
-  })
 }
+
+// storage変更の監視（ポップアップでON/OFFされたとき）
+// 有効/無効に関係なく常にリスナーを登録
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'sync' && changes[ENABLE_KEY]) {
+    // リロードせずに表示を切り替え
+    updateDisplayedCounts(changes[ENABLE_KEY].newValue)
+  }
+})
 
 // Mastodonページかどうかを簡易チェック
 function isMastodonPage(): boolean {
