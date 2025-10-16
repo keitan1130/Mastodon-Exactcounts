@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Mastodon Exact Counts",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "description": "Mastodonの投稿数、FF数を省略せずに表示します。",
     "icons": {
         "128": "icons/icon.png"

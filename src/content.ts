@@ -45,12 +45,27 @@ function storeBothValues() {
       // 省略形のパターンをチェック（1.3K、1.3k、1.3M等）
       // 完全一致する場合のみ保存する
       if (/^\d+(?:\.\d+)?[kKmM]$/.test(text)) {
-        // 元の省略形と正確な数値の両方を保存
-        strongEl.setAttribute('data-abbreviated', text) // 例: "1.3K"
-        strongEl.setAttribute('data-exact', exactNumber) // 例: "1,262"
+        // strong要素の構造を保持するため、最も内側のテキストノードを持つspan要素を探す
+        // 構造: <strong><span><span>1.3</span>K</span></strong>
+        // 最初の子spanを取得
+        const outerSpan = strongEl.querySelector('span')
+        if (outerSpan) {
+          // その中の最初の子spanを取得（数値部分）
+          const innerSpan = outerSpan.querySelector('span')
+          if (innerSpan) {
+            // 元の省略形の数値部分と正確な数値の両方を保存
+            const abbreviatedNumber = innerSpan.textContent?.trim() ?? '' // 例: "1.3"
+            const unit = text.slice(abbreviatedNumber.length) // 例: "K"
 
-        // 親要素に処理済みマークを付ける
-        el.setAttribute(PROCESSED_ATTR, 'true')
+            // outerSpanに属性を保存（構造が変わっても見つけられるように）
+            outerSpan.setAttribute('data-abbreviated', abbreviatedNumber)
+            outerSpan.setAttribute('data-exact', exactNumber) // 例: "1,262"
+            outerSpan.setAttribute('data-unit', unit) // 例: "K"
+
+            // 親要素に処理済みマークを付ける
+            el.setAttribute(PROCESSED_ATTR, 'true')
+          }
+        }
       }
     })
   })
@@ -61,24 +76,31 @@ function updateDisplayedCounts(showExact: boolean) {
   const processedLinks = document.querySelectorAll(`[${PROCESSED_ATTR}]`)
 
   processedLinks.forEach((el) => {
-    const strongElements = el.querySelectorAll('strong[data-abbreviated][data-exact]')
+    // outerSpanを探す（data属性がついている要素）
+    const outerSpans = el.querySelectorAll('span[data-abbreviated][data-exact]')
 
-    strongElements.forEach((strongEl) => {
-      const abbreviated = strongEl.getAttribute('data-abbreviated')
-      const exact = strongEl.getAttribute('data-exact')
+    outerSpans.forEach((outerSpan) => {
+      const abbreviated = outerSpan.getAttribute('data-abbreviated')
+      const exact = outerSpan.getAttribute('data-exact')
+      const unit = outerSpan.getAttribute('data-unit')
 
-      // 現在の表示内容と変更後が同じ場合はスキップ
-      const currentText = strongEl.textContent?.trim()
-      const targetText = showExact ? exact : abbreviated
+      if (!abbreviated || !exact) return
+
+      const currentText = outerSpan.textContent?.trim()
+      const targetText = showExact ? exact : `${abbreviated}${unit ?? ''}`
 
       if (currentText === targetText) {
         return // 変更不要
       }
 
-      if (showExact && exact) {
-        strongEl.innerHTML = exact
-      } else if (!showExact && abbreviated) {
-        strongEl.innerHTML = abbreviated
+      if (showExact) {
+        // 正確な値を表示する場合
+        // span全体のテキストを正確な値に置き換え
+        outerSpan.textContent = exact
+      } else {
+        // 省略形に戻す場合
+        // 元の構造を復元: <span><span>1.3</span>K</span>
+        outerSpan.innerHTML = `<span>${abbreviated}</span>${unit ?? ''}`
       }
     })
   })
