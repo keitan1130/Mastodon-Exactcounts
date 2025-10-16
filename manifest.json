@@ -1,0 +1,35 @@
+{
+"manifest_version": 3,
+"name": "Mastodon Exact Counts",
+"version": "0.1.0",
+"description": "Show Mastodon post counts (replies/reblogs/favourites) in full instead of abbreviated 1.2k",
+
+
+"action": {
+"default_popup": "popup/index.html"
+},
+
+
+"background": {
+"service_worker": "src/background.ts"
+},
+
+
+"content_scripts": [
+{
+"matches": [
+"https://*/*",
+"http://*/*"
+],
+"js": ["src/content.ts"],
+"run_at": "document_idle"
+}
+],
+
+
+"permissions": ["storage"],
+"host_permissions": [
+"https://*/*",
+"http://*/*"
+]
+}
